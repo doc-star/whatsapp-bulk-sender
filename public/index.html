@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bulk Sender</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 20px auto; padding: 20px; }
+        input, textarea, button { width: 100%; margin-bottom: 10px; padding: 8px; box-sizing: border-box; }
+        button { background-color: #25D366; color: white; border: none; cursor: pointer; }
+        button:disabled { background-color: #aaa; }
+        .preview { background: #f0f0f0; padding: 10px; margin: 10px 0; font-size: 12px; word-break: break-all; }
+        .status { margin-top: 10px; }
+        .qr-container { text-align: center; margin: 20px 0; }
+        img.qr { max-width: 200px; border: 1px solid #ddd; padding: 10px; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>WhatsApp Bulk Message Sender</h1>
+    <p><strong>Important:</strong> Use only with consent. Unofficial tool – use at your own risk.</p>
+
+    <h3>1. Upload Numbers (Excel/CSV)</h3>
+    <input type="file" id="fileInput" accept=".csv, .xlsx, .xls">
+    <button id="uploadBtn">Upload</button>
+    <div id="preview" class="preview"></div>
+
+    <h3>2. Type Your Message</h3>
+    <textarea id="message" rows="4" placeholder="Enter your message here..."></textarea>
+    <button id="saveMsgBtn">Save Message</button>
+
+    <h3>3. Start Sending</h3>
+    <button id="sendBtn" disabled>Send to All</button>
+    <div id="status" class="status"></div>
+
+    <div id="qrContainer" class="qr-container" style="display:none;">
+        <h3>Scan this QR code with WhatsApp</h3>
+        <img id="qrImage" class="qr" />
+        <p>Open WhatsApp → Settings → Linked Devices → Link a Device</p>
+    </div>
+
+    <script>
+        let numbersCount = 0;
+        let sendStarted = false;
+        let qrPollInterval = null;
+
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fileInput = document.getElementById('fileInput');
+        const previewDiv = document.getElementById('preview');
+        const messageTextarea = document.getElementById('message');
+        const saveMsgBtn = document.getElementById('saveMsgBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const statusDiv = document.getElementById('status');
+        const qrContainer = document.getElementById('qrContainer');
+        const qrImage = document.getElementById('qrImage');
+
+        uploadBtn.onclick = async () => {
+            const file = fileInput.files[0];
+            if (!file) { alert('Please select a file'); return; }
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                numbersCount = data.count;
+                previewDiv.innerText = `Uploaded ${data.count} numbers. Preview: ${data.preview.join(', ')}`;
+                sendBtn.disabled = false;
+            } else {
+                previewDiv.innerText = `Error: ${data.error}`;
+                sendBtn.disabled = true;
+            }
+        };
+
+        saveMsgBtn.onclick = async () => {
+            const msg = messageTextarea.value;
+            if (!msg) { alert('Please enter a message'); return; }
+            const res = await fetch('/set-message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                statusDiv.innerHTML = '<span class="success">Message saved.</span>';
+            } else {
+                statusDiv.innerHTML = `<span class="error">Error: ${data.error}</span>`;
+            }
+        };
+
+        sendBtn.onclick = async () => {
+            if (numbersCount === 0) { alert('No numbers uploaded'); return; }
+            const msg = messageTextarea.value;
+            if (!msg) { alert('Please enter a message'); return; }
+            sendBtn.disabled = true;
+            statusDiv.innerHTML = 'Starting...';
+            
+            const res = await fetch('/send', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) {
+                statusDiv.innerHTML = `<span class="error">Error: ${data.error}</span>`;
+                sendBtn.disabled = false;
+                return;
+            }
+            statusDiv.innerHTML = data.status;
+            sendStarted = true;
+            // Start polling for QR code
+            qrPollInterval = setInterval(pollQR, 2000);
+        };
+
+        async function pollQR() {
+            const res = await fetch('/qr');
+            const data = await res.json();
+            if (data.qr) {
+                qrImage.src = data.qr;
+                qrContainer.style.display = 'block';
+                statusDiv.innerHTML = 'QR code ready. Scan with your phone.';
+            } else if (qrContainer.style.display === 'block') {
+                // QR disappeared => logged in
+                clearInterval(qrPollInterval);
+                qrContainer.style.display = 'none';
+                statusDiv.innerHTML = 'Logged in! Sending messages... (check console for progress)';
+            }
+        }
+    </script>
+</body>
+</html>
